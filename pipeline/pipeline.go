@@ -2,89 +2,73 @@ package pipeline
 
 import (
 	"context"
-	"fmt"
-	"sync"
 )
 
-// Message represents a unit of data flowing through the pipeline.
-type Message struct {
-	Payload interface{}
-	Meta    map[string]string
+// Stage is a function that transforms a channel of type In into a channel of type Out.
+type Stage[In any, Out any] func(ctx context.Context, in <-chan In) <-chan Out
+
+// Pipeline holds a source channel and a context for orchestrating stages.
+type Pipeline[T any] struct {
+	ctx context.Context
+	src <-chan T
 }
 
-// Stage is a processing unit that transforms messages.
-type Stage func(ctx context.Context, in <-chan Message) (<-chan Message, error)
-
-// Pipeline orchestrates a series of stages with backpressure support.
-type Pipeline struct {
-	mu     sync.Mutex
-	stages []Stage
-	bufSize int
+// New creates a new Pipeline from the given context and source channel.
+func New[T any](ctx context.Context, src <-chan T) *Pipeline[T] {
+	return &Pipeline[T]{ctx: ctx, src: src}
 }
 
-// New creates a new Pipeline with the given buffer size per stage channel.
-func New(bufSize int) *Pipeline {
-	if bufSize <= 0 {
-		bufSize = 1
-	}
-	return &Pipeline{bufSize: bufSize}
+// Run executes the pipeline and returns the output channel.
+func (p *Pipeline[T]) Run() <-chan T {
+	return p.src
 }
 
-// AddStage appends a processing stage to the pipeline.
-func (p *Pipeline) AddStage(s Stage) *Pipeline {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.stages = append(p.stages, s)
-	return p
-}
-
-// Run executes the pipeline starting from the given source channel.
-// It wires stages sequentially and returns the final output channel.
-func (p *Pipeline) Run(ctx context.Context, source <-chan Message) (<-chan Message, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if len(p.stages) == 0 {
-		return nil, fmt.Errorf("pipeline: no stages defined")
-	}
-
-	current := source
-	for i, stage := range p.stages {
-		out, err := stage(ctx, current)
-		if err != nil {
-			return nil, fmt.Errorf("pipeline: stage %d failed to start: %w", i, err)
-		}
-		current = out
-	}
-	return current, nil
-}
-
-// MapStage returns a Stage that applies fn to every message payload.
-func MapStage(bufSize int, fn func(Message) (Message, error)) Stage {
-	return func(ctx context.Context, in <-chan Message) (<-chan Message, error) {
-		out := make(chan Message, bufSize)
+// MapStage applies a transformation function to each element in the stream.
+func MapStage[T any, U any](fn func(T) U) Stage[T, U] {
+	return func(ctx context.Context, in <-chan T) <-chan U {
+		out := make(chan U)
 		go func() {
 			defer close(out)
 			for {
 				select {
 				case <-ctx.Done():
 					return
-				case msg, ok := <-in:
+				case item, ok := <-in:
 					if !ok {
 						return
 					}
-					result, err := fn(msg)
-					if err != nil {
-						continue // skip errored messages; real impl could send to dead-letter
-					}
 					select {
-					case out <- result:
+					case out <- fn(item):
 					case <-ctx.Done():
 						return
 					}
 				}
 			}
 		}()
-		return out, nil
+		return out
+	}
+}
+
+// Pipe connects a Stage to a Pipeline, returning a new Pipeline with the transformed type.
+func Pipe[In any, Out any](p *Pipeline[In], stage Stage[In, Out]) *Pipeline[Out] {
+	return &Pipeline[Out]{
+		ctx: p.ctx,
+		src: stage(p.ctx, p.src),
+	}
+}
+
+// Collect drains the pipeline output channel into a slice.
+func Collect[T any](ctx context.Context, ch <-chan T) []T {
+	var result []T
+	for {
+		select {
+		case <-ctx.Done():
+			return result
+		case item, ok := <-ch:
+			if !ok {
+				return result
+			}
+			result = append(result, item)
+		}
 	}
 }
