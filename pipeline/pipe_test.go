@@ -74,3 +74,17 @@ func TestCollect_ContextCancelled(t *testing.T) {
 	// With cancelled context, may collect 0 items
 	_ = result
 }
+
+func TestPipe_FilterAll(t *testing.T) {
+	ctx := context.Background()
+	src := intSource(1, 2, 3, 4, 5)
+
+	p := pipeline.New(ctx, src)
+	// Filter out everything
+	filtered := pipeline.Pipe(p, pipeline.FilterStage(func(v int) bool { return false }))
+
+	result := pipeline.Collect(ctx, filtered.Run())
+	if len(result) != 0 {
+		t.Fatalf("expected empty result after filtering all, got %v", result)
+	}
+}
