@@ -98,6 +98,11 @@ func FanOutStage[T any](branches ...func(ctx context.Context, in <-chan T) <-cha
 func MergeStage[T any](ctx context.Context, inputs ...<-chan T) <-chan T {
 	out := make(chan T)
 
+	if len(inputs) == 0 {
+		close(out)
+		return out
+	}
+
 	var wg sync.WaitGroup
 	for _, in := range inputs {
 		wg.Add(1)
