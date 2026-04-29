@@ -52,3 +52,24 @@ func ExampleDropStage() {
 	// b
 	// c
 }
+
+// ExampleBufferStage_cancelledContext demonstrates that cancelling the context
+// stops the buffer stage and closes the output channel cleanly.
+func ExampleBufferStage_cancelledContext() {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Unbuffered input so the stage blocks after the context is cancelled.
+	in := make(chan int)
+	cancel() // cancel before any items are sent
+
+	out := pipeline.BufferStage[int](4)(ctx, in)
+
+	// The output channel should be closed immediately because the context
+	// was already cancelled; the range loop exits without printing anything.
+	for v := range out {
+		fmt.Println(v)
+	}
+	fmt.Println("done")
+	// Output:
+	// done
+}
