@@ -53,3 +53,26 @@ func ExampleTopNStage() {
 	// 40
 	// 30
 }
+
+func ExampleTopNStage_bottom() {
+	ctx := context.Background()
+
+	ch := make(chan int, 5)
+	for _, v := range []int{10, 30, 20, 50, 40} {
+		ch <- v
+	}
+	close(ch)
+
+	// Emit bottom 3 smallest values by reversing the comparator
+	bottom := pipeline.TopNStage[int](3, func(a, b int) bool {
+		return a < b
+	})(ctx, ch)
+
+	for v := range bottom {
+		fmt.Println(v)
+	}
+	// Output:
+	// 10
+	// 20
+	// 30
+}
