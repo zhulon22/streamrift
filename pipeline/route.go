@@ -82,3 +82,16 @@ func BroadcastStage[T any](ctx context.Context, in <-chan T, n int) []<-chan T {
 
 	return result
 }
+
+// PartitionStage splits a single input channel into exactly 2 output channels
+// based on a boolean predicate. Items for which the predicate returns true are
+// sent to the first channel; all other items are sent to the second channel.
+func PartitionStage[T any](ctx context.Context, in <-chan T, pred func(T) bool) (<-chan T, <-chan T) {
+	result := RouteStage(ctx, in, 2, func(item T) int {
+		if pred(item) {
+			return 0
+		}
+		return 1
+	})
+	return result[0], result[1]
+}
